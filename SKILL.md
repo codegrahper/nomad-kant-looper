@@ -192,6 +192,13 @@ nomad-kant-looper는 내부적으로 짧은 ID(`gemini-3.6-flash`)를 그대로 
 2026-07-24부터 `gemini-3.6-flash`(Medium)이며, `gemini-3.5-flash`는 명시 호출로
 계속 지원한다. 자세한 CLI 버전별 확인 내역은 `references/agy-cli-notes.md` 참고.
 
+`agy`는 2026-07-25부터 Playwright MCP에도 연결돼 있어, 정적 코드 생성에 그치지
+않고 실행 중인 개발 서버를 직접 조작하며 렌더링·콘솔 에러·반응형 레이아웃을
+스스로 검증할 수 있다. 단, Stitch와 마찬가지로 **명시하지 않으면 안 쓴다** —
+검증을 시키려면 TASK.md/프롬프트에 "Playwright MCP로 브라우저 단에서 최종
+검증하라"를 필수 절차로 못 박을 것. 자세한 내용은 `references/agy-cli-notes.md`
+§8 참고.
+
 **Claude:**
 - Claude uses its own default models
 - Claude does NOT select MiniMax model IDs
