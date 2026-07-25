@@ -419,6 +419,12 @@ git에 등록된 적 없는 새 파일).
 **Stitch** : Google의 AI UI 디자인 생성 도구. agy(Antigravity)에 MCP로 이미
 연결돼 있지만, 프롬프트에서 명시적으로 부르라고 하지 않으면 그냥 지나간다.
 
+**Playwright MCP** : 브라우저를 직접 조작(navigate, click, snapshot 등)할 수
+있는 MCP 서버. 2026-07-25부터 agy(Antigravity)에 연결돼, agy가 UI를 코드로
+만드는 데 그치지 않고 실행 중인 개발 서버를 실제로 열어 렌더링·콘솔 에러·반응형
+레이아웃을 스스로 검증(Self-Verification)할 수 있게 됐다. Stitch와 같은 원칙이
+적용된다 — 프롬프트에 검증을 명시해야 실제로 쓴다 (`references/agy-cli-notes.md` §8).
+
 **Hermes / H1·H2 패턴** : 다른 에이전트(Henry)가 쓰는 완료 알림 방식의 이름.
 전체 실행을 백그라운드+완료알림으로 감싸는 방식(H1), `--detach` 후 완료 대기를
 따로 백그라운드+완료알림으로 감싸는 방식(H2) 두 가지가 있다. 클로드는 같은

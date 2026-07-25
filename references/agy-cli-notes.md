@@ -160,6 +160,31 @@ CLI reference에서 이에 대응하는 `--worktree` 류 플래그를 찾지 못
 worktree 격리를 agy에 맡기지 않고 `timeout-runner.sh`의 cwd 강제로 직접 보장한다
 (위 2번). 나중에 CLI에도 동등한 옵션이 생기면 이중 방어로 추가 검토.
 
+## 8. Playwright MCP 연동 완료 (2026-07-25, 니체/agy 보고) — 브라우저 실시간 시각 검증
+
+**확인됨** — 로컬 환경에서 직접 확인:
+
+- `~/.gemini/antigravity/mcp_config.json`에 `playwright` 서버 등록됨
+  (`npx -y @playwright/mcp@latest`).
+- `npx playwright install chromium`으로 `~/Library/Caches/ms-playwright/`에
+  Chromium 바이너리 설치 확인됨 (`chromium-1234`, 설치일 2026-07-25).
+
+이 연동으로 agy는 UI를 정적 코드 생성으로 끝내지 않고, 실행 중인 개발 서버를
+Playwright MCP(`navigate`, `click`, `snapshot` 등)로 직접 조작하며 콘솔 에러·DOM
+렌더링 결함·반응형 레이아웃을 스스로 검증할 수 있다.
+
+**Stitch(§6)와 같은 원칙이 적용된다 — 시켜야 쓴다.** MCP가 연결돼 있다는 사실이
+곧 agy가 알아서 브라우저 검증을 수행한다는 뜻은 아니다. "UI 만들어줘" 정도로는
+검증 단계를 건너뛸 수 있으므로, TASK.md나 프롬프트에 검증을 **필수 절차**로
+명시해야 한다. 예: "구현 후 개발 서버를 띄우고 Playwright MCP로 실제 렌더링과
+동작을 최종 검증하라. 검증 결과(스크린샷 유무, 콘솔 에러 여부)를
+`notes_for_reviewer`에 남겨라."
+
+아직 확인 안 된 것: agy가 read-only 롤(plan/review/verify, `--mode plan`)에서도
+Playwright MCP의 `navigate`/`click` 같은 조작형 툴을 실제로 실행하는지, 아니면
+이것도 `--mode plan`의 "쓰기 무시" 범위에 걸리는지는 실측 전이다. write 계열
+role(implement/repair)에서 먼저 실측하고 이 항목을 갱신할 것.
+
 ## 참고 링크
 
 - https://antigravity.google/docs/cli/using (Settings, quick tips, keybindings)
