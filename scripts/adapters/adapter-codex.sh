@@ -93,6 +93,16 @@ call() {
     -m "$model"
   )
 
+  # --disable plugins: OMO 등 사용자 개인 플러그인(및 그 훅 시스템)을 이번
+  # 호출에서만 끈다. lsp-daemon 같은 플러그인 훅이 "ASK THE USER" 안내문을
+  # 띄우는 경로 자체를 차단 — 사용자의 ~/.codex/config.toml plugins 설정은
+  # 건드리지 않는다 (검증: --disable plugin_hooks만으로는 훅이 계속 발화하고,
+  # --disable plugins라야 훅 호출이 0건이 됨). 다른 환경에 플러그인이 없어도
+  # 무해한 no-op이라 범용적으로 안전하다.
+  if [ "${KANT_CODEX_DISABLE_PLUGINS:-1}" = "1" ]; then
+    cmd+=( --disable plugins )
+  fi
+
   # json-schema가 role별로 가능하면 추가 (옵션)
   local schema_file="$ADAPTER_DIR/../schemas/${role}-schema.json"
   if [ -f "$schema_file" ]; then
