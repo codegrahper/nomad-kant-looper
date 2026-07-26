@@ -165,12 +165,15 @@ with open(response_file, 'wb') as out, open(log_file, 'a') as err:
 PYEOF
     exit_code=$?
   elif [ -n "$timeout_cmd" ]; then
-    ( cd "$cwd_dir" && "$timeout_cmd" "$timeout_secs" "$@" ) > "$response_file" 2>> "$log_file"
+    # stdin을 /dev/null로 리다이렉트 — 비대화형 프로세스가 tty/stdin을
+    # 기다리며 멈추는 것을 공통으로 방지 (Python wrapper 분기는 이미
+    # stdin=DEVNULL로 처리됨). 모든 어댑터가 이 한 곳에서 안전해진다.
+    ( cd "$cwd_dir" && "$timeout_cmd" "$timeout_secs" "$@" ) > "$response_file" 2>> "$log_file" < /dev/null
     exit_code=$?
   else
     # 둘 다 없으면 그냥 실행 (timeout 강제 불가)
     echo "[run-with-timeout] WARN: no timeout command available, running without timeout" >> "$log_file"
-    ( cd "$cwd_dir" && "$@" ) > "$response_file" 2>> "$log_file"
+    ( cd "$cwd_dir" && "$@" ) > "$response_file" 2>> "$log_file" < /dev/null
     exit_code=$?
   fi
 

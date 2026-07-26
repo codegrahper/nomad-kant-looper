@@ -456,6 +456,14 @@ $(if [ "$role" = "review" ]; then echo "현재 변경을 읽기 전용으로 검
 - 도구를 실행(tool call)한 직후에도 반드시 위에 정의한 JSON 포맷으로 응답을 출력해야 한다.
 - 도구 실행 후 응답을 출력하지 않고 끝나지 마라. 반드시 위 JSON 포맷의 응답을 작성해야 한다.
 - retry loop(재시도 루프)가 발생하지 않도록, 한 번의 구현 후 즉시 위 포맷으로 응답을 출력한다.
+
+## 중요: 비대화형(headless) 환경 — 확인 대기 금지
+- 너는 비대화형(headless) 환경에서 실행 중이다. 사람이 응답할 수 없다.
+- 권한/설치/승인 여부를 묻는 도구(예: ask_permission, lsp_install_decision류)를
+  호출해야 하는 상황이 오면, 절대 응답을 기다리지 말고 즉시 보수적인 기본값
+  (거부/declined 또는 스스로 판단해 진행)을 선택하고 작업을 계속하라.
+- 사람의 확인을 기다리는 어떤 형태의 대기도 금지한다. 확인이 꼭 필요하다고
+  판단되면 대기하지 말고 즉시 BLOCKED verdict로 그 이유를 보고하고 종료하라.
 EOF
 
   local adapter="$ADAPTERS_DIR/adapter-${tool}.sh"
@@ -622,6 +630,14 @@ Agents modify only their own workspace. Do not modify other agent folders.
 - 도구를 실행(tool call)한 직후에도 반드시 위에 정의한 JSON 포맷으로 응답을 출력해야 한다.
 - 도구 실행 후 응답을 출력하지 않고 끝나지 마라. 반드시 위 JSON 포맷의 응답을 작성해야 한다.
 - retry loop(재시도 루프)가 발생하지 않도록, 한 번의 구현 후 즉시 위 포맷으로 응답을 출력한다.
+
+## 중요: 비대화형(headless) 환경 — 확인 대기 금지
+- 너는 비대화형(headless) 환경에서 실행 중이다. 사람이 응답할 수 없다.
+- 권한/설치/승인 여부를 묻는 도구(예: ask_permission, lsp_install_decision류)를
+  호출해야 하는 상황이 오면, 절대 응답을 기다리지 말고 즉시 보수적인 기본값
+  (거부/declined 또는 스스로 판단해 진행)을 선택하고 작업을 계속하라.
+- 사람의 확인을 기다리는 어떤 형태의 대기도 금지한다. 확인이 꼭 필요하다고
+  판단되면 대기하지 말고 즉시 BLOCKED verdict로 그 이유를 보고하고 종료하라.
 EOF
 
     (

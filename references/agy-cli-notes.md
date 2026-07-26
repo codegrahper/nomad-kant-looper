@@ -206,6 +206,60 @@ agy 내부 대기 제한과 harness outer 제한은 항상 동일하다. 기본 
 별도로 과도하게 늘리지 않는다. 기존 sandbox/mode/permission role 분기는
 변경하지 않았다.
 
+## 10. headless 호출이 사용자 확인 대기로 멈추는 문제 수정 (2026-07-27)
+
+codex(gpt-5.6-sol, review role) 진단에 따라 비대화형 `--print`/`exec` 호출이
+사용자 응답을 기다리며 outer timeout(최대 1800초)까지 낭비되는 현상의 원인을
+세 군데에서 수정했다.
+
+### 10-1. codex LSP 설치 게이트 (`adapter-codex.sh`)
+
+codex CLI의 OMO 플러그인(lsp-daemon)이 headless `implement`/`repair` 호출 중
+"ACTION REQUIRED — ASK THE USER whether to install this LSP server"를 반복
+출력하는데, 모델이 `lsp_install_decision` 도구를 호출하지 않고 그대로
+멈추는 현상이 실측됐다 (19회 안내, 0회 decision 호출). `-a never`는 core
+승인 요청만 억제하고 이 별도 플러그인 게이트는 해결하지 못한다.
+
+**수정**: `adapter-codex.sh`의 `codex exec` 호출에 `-a never`를 명시적으로
+추가했다 (기존: 사용자 `~/.codex/config.toml`의 `approval_policy=never`에
+암묵적 의존). 플러그인 게이트 자체는 프롬프트 지시문(아래 10-3)으로
+보완한다.
+
+### 10-2. stdin 중앙화 (`timeout-runner.sh`)
+
+5개 어댑터 중 `adapter-agy.sh`만 `timeout-runner.sh` 호출 시 `< /dev/null`로
+stdin을 막고 있었다. 나머지 4개(codex, opencode, grok, claude)는 stdin이
+열린 상태로 외부 CLI 프로세스가 실행될 수 있어, tty 기반 상호작용 경로가
+있으면 멈출 위험이 있었다.
+
+**수정**: `timeout-runner.sh`의 `run_with_timeout` 내부 `timeout_cmd` 분기와
+fallback 분기에 공통으로 `< /dev/null`를 추가했다. Python wrapper 분기는
+이미 `stdin=subprocess.DEVNULL`로 처리되어 있어 변경 없음. 한 곳에서 5개
+어댑터 모두 안전해진다.
+
+### 10-3. 프롬프트 headless 지시문 (`kant-loop.sh`)
+
+두 프롬프트 빌더(`run_quick_mode` = quick 단일/chain 호출용,
+`run_parallel_mode` = 병렬 검토용) 모두에 "비대화형(headless) 환경 — 확인
+대기 금지" 섹션을 추가했다:
+
+- 권한/설치/승인 여부를 묻는 도구(ask_permission, lsp_install_decision류)를
+  만나면 응답을 기다리지 말고 즉시 보수적인 기본값을 선택.
+- 확인이 꼭 필요하면 대기하지 말고 즉시 BLOCKED verdict로 보고하고 종료.
+
+이 지시문은 agy의 `ask_permission`(`--dangerously-skip-permissions`가
+대상이 아닌 별도 상호작용 경로)과 codex의 플러그인 LSP 게이트 모두에
+대응한다. 프롬프트에 의존하는 방식이므로 모델이 지시문을 따르지 않을
+가능성은 남아 있으며, 이 경우 timeout이 최종 안전망이다.
+
+### 하지 않은 것 (범위 제한)
+
+- "확인 대기 상태를 조기 감지해 강제 종료하는" 감시 로직은 재도입하지
+  않았다 (v0.8에서 의도적으로 제거된 no-progress detector와 유사 범주).
+- agy의 미문서화된 내부 설정(`auto_interaction_behavior` 등)은 건드리지
+  않았다 (공식 CLI 인터페이스로 확인되지 않음).
+- opencode/grok/claude 어댑터의 개별 상호작용 정책 재검토는 별도 검토 후.
+
 ## 참고 링크
 
 - https://antigravity.google/docs/cli/using (Settings, quick tips, keybindings)
