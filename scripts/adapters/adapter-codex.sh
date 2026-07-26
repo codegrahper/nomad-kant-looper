@@ -79,14 +79,17 @@ call() {
   prompt="$(cat "$prompt_file")"
 
   # 명령 구성 — role별 sandbox + json + json-schema (있다면)
-  # -a never: approval policy를 명시적으로 never로 고정. 사용자의
+  # -c approval_policy=never: approval policy를 명시적으로 never로 고정. 사용자의
   #   ~/.codex/config.toml approval_policy=never에 암묵적으로 의존하지 않고
   #   환경에 상관없이 승인 프롬프트를 억제한다 (core 승인만 해당 — 플러그인
   #   게이트는 프롬프트 지시문으로 별도 처리).
+  #   주의: `-a`/`--ask-for-approval`은 최상위 `codex` 명령 전용이고 `codex exec`
+  #   서브커맨드에는 없다 (실측: "unexpected argument '-a' found"로 즉시 실패).
+  #   `codex exec`에서는 `-c approval_policy=<value>`로 같은 설정을 넘겨야 한다.
   local cmd=(
     codex exec
     --json
-    -a never
+    -c approval_policy=never
     -o "$response_file"
     -s "$sandbox_mode"
     -C "$worktree"
