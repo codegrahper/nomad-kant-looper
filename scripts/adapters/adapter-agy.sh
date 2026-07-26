@@ -49,6 +49,7 @@ call() {
 
   local timeout
   timeout=$("$SKILL_LIB/timeout-runner.sh" timeout-for "$role")
+  local print_timeout="${timeout}s"
 
   # role에 따른 sandbox/실행 모드 결정
   # - plan / review / verify: read-only (안전)
@@ -130,6 +131,7 @@ call() {
   local cmd=(
     agy
     -p "$prompt_text"
+    --print-timeout "$print_timeout"
     --add-dir "$worktree"
     --model "$normalized_model"
     --sandbox "$sandbox_mode"

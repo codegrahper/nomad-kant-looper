@@ -185,6 +185,27 @@ Playwright MCP의 `navigate`/`click` 같은 조작형 툴을 실제로 실행하
 이것도 `--mode plan`의 "쓰기 무시" 범위에 걸리는지는 실측 전이다. write 계열
 role(implement/repair)에서 먼저 실측하고 이 항목을 갱신할 것.
 
+## 9. `--print-timeout`을 outer role timeout과 동기화 (2026-07-26)
+
+**확인됨** — 로컬 `agy --version`은 `1.1.7`, `agy --help`에는 다음 옵션이 있다:
+
+```
+--print-timeout   Timeout for print mode wait (default 5m0s)
+```
+
+`agy --print`는 별도의 응답 대기 타이머를 가진다. 이전 `adapter-agy.sh`는 이
+플래그를 넘기지 않아 기본 5분이 적용됐고, 긴 implement/repair 요청이
+`Error: timeout waiting for response`로 약 306~309초에 종료될 수 있었다. 이는
+`timeout-runner.sh`의 role별 outer timeout(기본: plan 600초, review/verify 900초,
+implement/repair 1800초)과 독립적으로 발생하는 조기 실패다.
+
+adapter는 이제 `timeout-runner.sh timeout-for <role>`가 돌려준 실제 값(환경변수
+override 포함)을 `${timeout}s` 형식으로 `--print-timeout`에 명시 전달한다. 따라서
+agy 내부 대기 제한과 harness outer 제한은 항상 동일하다. 기본 적용값은 plan
+`600s`, review/verify `900s`, implement/repair `1800s`이고, read-only role을
+별도로 과도하게 늘리지 않는다. 기존 sandbox/mode/permission role 분기는
+변경하지 않았다.
+
 ## 참고 링크
 
 - https://antigravity.google/docs/cli/using (Settings, quick tips, keybindings)
