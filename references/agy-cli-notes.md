@@ -217,13 +217,25 @@ codex(gpt-5.6-sol, review role) 진단에 따라 비대화형 `--print`/`exec` �
 codex CLI의 OMO 플러그인(lsp-daemon)이 headless `implement`/`repair` 호출 중
 "ACTION REQUIRED — ASK THE USER whether to install this LSP server"를 반복
 출력하는데, 모델이 `lsp_install_decision` 도구를 호출하지 않고 그대로
-멈추는 현상이 실측됐다 (19회 안내, 0회 decision 호출). `-a never`는 core
-승인 요청만 억제하고 이 별도 플러그인 게이트는 해결하지 못한다.
+멈추는 현상이 실측됐다 (19회 안내, 0회 decision 호출). approval policy는
+core 승인 요청만 억제하고 이 별도 플러그인 게이트는 해결하지 못한다.
 
-**수정**: `adapter-codex.sh`의 `codex exec` 호출에 `-a never`를 명시적으로
-추가했다 (기존: 사용자 `~/.codex/config.toml`의 `approval_policy=never`에
-암묵적 의존). 플러그인 게이트 자체는 프롬프트 지시문(아래 10-3)으로
-보완한다.
+**수정 1 (승인 정책 명시)**: `adapter-codex.sh`의 `codex exec` 호출에
+`-c approval_policy=never`를 명시적으로 추가했다 (기존: 사용자
+`~/.codex/config.toml`의 `approval_policy=never`에 암묵적 의존). **주의**:
+`-a`/`--ask-for-approval`은 최상위 `codex` 명령 전용이고 `codex exec`
+서브커맨드에는 없다 — 실측 결과 `codex exec -a never`는
+`unexpected argument '-a' found`로 즉시 실패한다. `codex exec`에서 같은
+설정을 넘기려면 반드시 `-c approval_policy=<value>`를 써야 한다.
+
+**수정 2 (플러그인 훅 게이트 자체 차단)**: `--disable plugin_hooks`만으로는
+훅이 계속 발화함을 실측했다 (22건). `--disable plugins`를 추가하니 훅 호출이
+0건으로 떨어졌다 — OMO 훅 시스템 자체가 등록되지 않아 LSP 설치 안내문이
+생성되는 경로 자체가 없어진다. `adapter-codex.sh`의 모든 `codex exec` 호출에
+기본으로 추가했고 (`KANT_CODEX_DISABLE_PLUGINS=0`으로 끌 수 있음), 사용자의
+`~/.codex/config.toml` 전역 plugins 설정은 건드리지 않는다 — 플러그인이 없는
+환경에서도 무해한 no-op이라 범용적으로 안전하다. 프롬프트 지시문(아래
+10-3)은 이 수정에도 불구하고 최후 안전망으로 유지한다.
 
 ### 10-2. stdin 중앙화 (`timeout-runner.sh`)
 
@@ -251,6 +263,28 @@ fallback 분기에 공통으로 `< /dev/null`를 추가했다. Python wrapper �
 대상이 아닌 별도 상호작용 경로)과 codex의 플러그인 LSP 게이트 모두에
 대응한다. 프롬프트에 의존하는 방식이므로 모델이 지시문을 따르지 않을
 가능성은 남아 있으며, 이 경우 timeout이 최종 안전망이다.
+
+### 10-4. agy `ask_permission` — 개인 설정이 필요한 유일한 항목
+
+agy는 codex와 달리 "컨텍스트 파일(GEMINI.md)을 무시하라"는 CLI 플래그가
+없다 (`agy --help` 확인, `--dangerously-skip-permissions`는 일반 tool
+permission 자동승인만 다루고 `ask_permission`은 대상이 아니다). 따라서 이
+문제는 어댑터 플래그만으로 완결되지 않고, **사용자의 `~/.gemini/GEMINI.md`
+자체에 예외 조항이 있어야** headless 호출이 멈추지 않는다.
+
+이 저장소를 새로 설치하는 사용자는 자신의 `GEMINI.md`에 `ask_permission`
+지시문이 있다면(또는 앞으로 추가한다면) 아래 취지의 예외를 함께 넣을 것을
+권장한다:
+
+> 단, `--print`(비대화형/headless) 모드로 실행 중일 때는 예외입니다. 이때는
+> 응답할 사람이 없으므로 `ask_permission`을 호출하지 않습니다. 권한이
+> 필요하면 스스로 판단해 가장 보수적인 기본값으로 진행하거나, 대기하지
+> 말고 그 사유를 남기고 종료합니다.
+
+10-3의 프롬프트 지시문이 최후 안전망 역할을 하지만, GEMINI.md 자체의
+전역 지시문이 매 세션 초기에 강하게 주입되므로 예외 조항 없이는 프롬프트
+지시문과 상충할 수 있다. 이 항목만은 어댑터 스크립트로 자동화할 수 없는
+개인 설정 영역이라 문서화로 남긴다.
 
 ### 하지 않은 것 (범위 제한)
 
