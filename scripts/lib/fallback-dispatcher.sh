@@ -312,14 +312,17 @@ do_fallback() {
         sleep "$backoff"
       fi
 
-      # 호출 — 어댑터가 rc=0으로 응답해도 verdict=PASS일 때만 SUCCESS로 간주
-      # (BLOCKED/CHANGES_REQUESTED/INVALID_OUTPUT 응답은 다음 fallback 시도)
+      # 호출 — 어댑터가 rc=0으로 응답해도 verdict=PASS일 때만 SUCCESS로 간주.
+      # 단, role=review는 CHANGES_REQUESTED도 정상적인 리뷰 완료이므로 SUCCESS로
+      # 간주한다 — 그렇지 않으면 CHANGES_REQUESTED를 낸 리뷰어를 실패 취급하고
+      # PASS가 나올 때까지 다른 리뷰어를 계속 시도하는 "리뷰어 쇼핑"이 된다.
+      # (BLOCKED/INVALID_OUTPUT 응답은 role에 관계없이 다음 fallback 시도)
       echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] fallback attempt: $next_tool:$next_model role=$role" >> "$FALLBACK_LOG"
       _log_state_event "$state_dir" "FALLBACK_ATTEMPT role=$role tool=$next_tool model=$next_model status=trying attempt=$attempt from=$failed_tool:$failed_model"
       local fb_output fb_verdict
       if fb_output="$("$LIB_DIR/../adapters/adapter-$next_tool.sh" call "$role" "$prompt_file" "$worktree" "$next_model")"; then
         fb_verdict="${fb_output%%|*}"
-        if [ "$fb_verdict" = "PASS" ]; then
+        if [ "$fb_verdict" = "PASS" ] || { [ "$role" = "review" ] && [ "$fb_verdict" = "CHANGES_REQUESTED" ]; }; then
           echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] fallback SUCCESS: $next_tool:$next_model" >> "$FALLBACK_LOG"
           _log_state_event "$state_dir" "FALLBACK_ATTEMPT role=$role tool=$next_tool model=$next_model status=success"
           echo "$fb_output"

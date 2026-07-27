@@ -15,6 +15,15 @@
 #   건드리지 않게 한다. standalone 호출(기본값 0)과 fail_run 즉시 실패
 #   경로는 기존 동작을 그대로 유지해야 한다.
 #
+# 후속 수정 (패치 A, review→repair→재검증 닫힌 루프 복원):
+#   run_quick_chain이 initial review/repair/final review 조건부 상태 머신으로
+#   바뀌면서, review 역할이 한 실행에서 두 번(초기+최종) 불릴 수 있게 됐다.
+#   그래서 mockagent도 role별 호출 횟수를 세고 MOCK_VERDICT_<ROLE>_<N>으로
+#   호출 회차별 verdict를 다르게 줄 수 있어야 한다. test 4는 "review가
+#   CHANGES_REQUESTED면 repair를 부르면 안 된다"는 옛 버그를 정답으로 고정하고
+#   있었으므로, 고쳐진 새 계약(review CHANGES_REQUESTED → repair는 반드시
+#   호출돼야 함)에 맞게 다시 썼다.
+#
 # 이 테스트는 실제 codex/opencode를 부르지 않는다 — 즉시 응답하는 가짜
 # adapter(mockagent)로 scripts/ 전체를 격리된 임시 디렉터리에 복사해서 돈다.
 
@@ -47,20 +56,32 @@ call() {
   local state_dir
   state_dir="$(cd "$(dirname "$prompt_file")" && pwd)"
 
+  # review는 한 실행에서 두 번(초기/최종) 불릴 수 있으므로 role별 호출
+  # 횟수를 센다. 회차별 verdict override: MOCK_VERDICT_<ROLE>_<N> >
+  # MOCK_VERDICT_<ROLE>(모든 회차 공통) > PASS(기본값).
+  local role_upper
+  role_upper="$(printf '%s' "$role" | tr '[:lower:]' '[:upper:]')"
+
+  local count_file="$state_dir/callcount-${role}"
+  local count=0
+  [ -f "$count_file" ] && count="$(cat "$count_file")"
+  count=$((count + 1))
+  printf '%s' "$count" > "$count_file"
+
   # 이 stage의 adapter가 호출된 "시점"에 공유 result.txt가 어떤 상태였는지
   # 스냅샷을 남긴다 — 회귀 검증의 핵심 관찰 지점.
   if [ -f "$state_dir/result.txt" ]; then
-    cp "$state_dir/result.txt" "$state_dir/observed-result-at-${role}.txt"
+    cp "$state_dir/result.txt" "$state_dir/observed-result-at-${role}-${count}.txt"
   else
-    printf '%s' "MISSING" > "$state_dir/observed-result-at-${role}.txt"
+    printf '%s' "MISSING" > "$state_dir/observed-result-at-${role}-${count}.txt"
   fi
 
-  local role_upper verdict override
-  role_upper="$(printf '%s' "$role" | tr '[:lower:]' '[:upper:]')"
-  eval "override=\"\${MOCK_VERDICT_${role_upper}:-}\""
-  verdict="${override:-PASS}"
+  local override_n override_generic verdict
+  eval "override_n=\"\${MOCK_VERDICT_${role_upper}_${count}:-}\""
+  eval "override_generic=\"\${MOCK_VERDICT_${role_upper}:-}\""
+  verdict="${override_n:-${override_generic:-PASS}}"
 
-  local json_path="$state_dir/mock-${role}.json"
+  local json_path="$state_dir/mock-${role}-${count}.json"
   printf '{"verdict":"%s","summary":"mock","findings":[],"changed_files":[],"tests_added_or_updated":[],"risks":[],"notes_for_reviewer":""}' "$verdict" > "$json_path"
 
   echo "$verdict|$json_path"
@@ -94,7 +115,7 @@ make_task() {
 }
 
 # ─────────────────────────────────────────
-echo "[test 1] 체인 중간 단계(implement, review)는 result.txt가 아직 비어있는 상태를 봐야 한다"
+echo "[test 1] 체인 중간 단계(implement, review-initial, repair, review-final)는 result.txt가 아직 비어있는 상태를 봐야 한다"
 
 REPO1="$TMP_ROOT/repo1"
 STATE1="$TMP_ROOT/state1"
@@ -102,20 +123,24 @@ make_repo "$REPO1"
 make_task "$TMP_ROOT/task1.md"
 mkdir -p "$STATE1"
 
+# 초기 review는 CHANGES_REQUESTED로 repair를 강제로 발동시키고, 최종 review는
+# PASS로 체인이 끝까지(commit 직전까지) 흐르게 한다 — implement/review-initial/
+# repair/review-final 네 호출 모두를 관측 대상에 넣기 위함.
+MOCK_VERDICT_REVIEW_1="CHANGES_REQUESTED" MOCK_VERDICT_REVIEW_2="PASS" \
 KANT_AUTO_COMMIT=0 "$KANT_LOOP" _run_mode quick "$TMP_ROOT/task1.md" "$STATE1" "$REPO1" '' '' \
   "mockagent:m1,mockagent:m2,mockagent:m3" '' >/dev/null 2>&1 || true
 
 ok=1
-for role in implement review repair; do
-  observed="$STATE1/observed-result-at-${role}.txt"
+for observed_key in implement-1 review-1 repair-1 review-2; do
+  observed="$STATE1/observed-result-at-${observed_key}.txt"
   if [ ! -f "$observed" ]; then
-    echo "  FAIL: $role stage never invoked (observed 파일 없음)"
+    echo "  FAIL: $observed_key stage never invoked (observed 파일 없음)"
     ok=0
     continue
   fi
   content="$(cat "$observed")"
   if [ "$content" != "MISSING" ]; then
-    echo "  FAIL: $role 단계 시작 시점에 result.txt가 이미 '$content'로 채워져 있었음 (조기 기록 버그 재발)"
+    echo "  FAIL: $observed_key 단계 시작 시점에 result.txt가 이미 '$content'로 채워져 있었음 (조기 기록 버그 재발)"
     ok=0
   fi
 done
@@ -143,7 +168,7 @@ standalone_result="$(cat "$STATE2/result.txt" 2>/dev/null || echo "MISSING")"
 if [ "$standalone_result" = "pass_no_commit" ]; then echo "  PASS"; ((PASS++)); else echo "  FAIL: result.txt='$standalone_result'"; ((FAIL++)); fi
 
 # ─────────────────────────────────────────
-echo "[test 4] 체인 중간 단계 실패(review=CHANGES_REQUESTED)는 즉시 failed로 끝나야 한다 (fail_run 경로 회귀 없음)"
+echo "[test 4] review가 끝까지 CHANGES_REQUESTED면 repair는 정확히 한 번만 불리고, 최종 실패는 REVIEW_NOT_CLEARED여야 한다"
 
 REPO3="$TMP_ROOT/repo3"
 STATE3="$TMP_ROOT/state3"
@@ -151,16 +176,20 @@ make_repo "$REPO3"
 make_task "$TMP_ROOT/task3.md"
 mkdir -p "$STATE3"
 
+# override 없이 MOCK_VERDICT_REVIEW만 주면 초기/최종 review 호출 모두에
+# 적용된다 — repair를 거치고도 여전히 CHANGES_REQUESTED인 상황을 재현한다.
 MOCK_VERDICT_REVIEW="CHANGES_REQUESTED" KANT_AUTO_COMMIT=0 "$KANT_LOOP" _run_mode quick "$TMP_ROOT/task3.md" "$STATE3" "$REPO3" '' '' \
   "mockagent:m1,mockagent:m2,mockagent:m3" '' >/dev/null 2>&1 || true
 
 fail_result="$(cat "$STATE3/result.txt" 2>/dev/null || echo "MISSING")"
-repair_invoked="$([ -f "$STATE3/observed-result-at-repair.txt" ] && echo yes || echo no)"
-if [ "$fail_result" = "failed" ] && [ "$repair_invoked" = "no" ]; then
+failure_code="$(cat "$STATE3/failure-code.txt" 2>/dev/null || echo "NONE")"
+repair_call_count="$(cat "$STATE3/callcount-repair" 2>/dev/null || echo 0)"
+
+if [ "$fail_result" = "failed" ] && [ "$failure_code" = "REVIEW_NOT_CLEARED" ] && [ "$repair_call_count" -eq 1 ]; then
   echo "  PASS"
   ((PASS++))
 else
-  echo "  FAIL: result.txt='$fail_result' repair_invoked=$repair_invoked (repair는 review 실패 시 호출되면 안 됨)"
+  echo "  FAIL: result.txt='$fail_result' failure-code='$failure_code' repair_call_count=$repair_call_count (기대: failed / REVIEW_NOT_CLEARED / repair 정확히 1회)"
   ((FAIL++))
 fi
 
