@@ -387,12 +387,47 @@ validate_agent_model_compatibility() {
 }
 
 # ---------------------------------------------------------------------------
+# stage sidecar 기록 (quick-chain 상태 머신용)
+# ---------------------------------------------------------------------------
+# run_quick_mode의 stdout 계약(verdict|json_path)은 adapter 결과 전달에 이미
+# 쓰이고 있으므로, chain 내부 단계 결과 전달용으로 재활용하지 않는다. 대신
+# state_dir에 stage별 사이드카 파일로 남긴다. json_path는 adapter가 role별
+# 고정 경로(예: codex-review.json)에 쓰기 때문에 review가 두 번(초기/최종)
+# 불리면 같은 경로가 재사용·덮어써진다 — 그래서 verdict 직후 즉시 stage_label
+# 이름의 사본으로 복사해 이후 단계가 원본을 덮어써도 안전하게 만든다.
+# 임시 파일 후 mv로 기록해 중간에 끊겨도 사이드카가 반쪽으로 남지 않게 한다.
+
+write_stage_result() {
+  local state_dir="$1" stage_label="$2" verdict="$3" json_src="$4"
+  local json_dst=""
+
+  if [ -n "$json_src" ] && [ -f "$json_src" ]; then
+    json_dst="$state_dir/stage-${stage_label}.json"
+    local tmp_json
+    tmp_json="$(mktemp "$state_dir/.tmp-stage-json.XXXXXX")"
+    cp "$json_src" "$tmp_json"
+    mv "$tmp_json" "$json_dst"
+  fi
+
+  local tmp_verdict
+  tmp_verdict="$(mktemp "$state_dir/.tmp-stage-verdict.XXXXXX")"
+  printf '%s' "$verdict" > "$tmp_verdict"
+  mv "$tmp_verdict" "$state_dir/stage-${stage_label}.verdict"
+
+  local tmp_path
+  tmp_path="$(mktemp "$state_dir/.tmp-stage-path.XXXXXX")"
+  printf '%s' "$json_dst" > "$tmp_path"
+  mv "$tmp_path" "$state_dir/stage-${stage_label}.json-path"
+}
+
+# ---------------------------------------------------------------------------
 # 단일 호출 (--quick 모드)
 # ---------------------------------------------------------------------------
 
 run_quick_mode() {
   local task_md="$1" tool="${2:-}" model="${3:-}" state_dir="$4" worktree="$5"
   local role="${6:-implement}" commit_at_end="${7:-1}" defer_terminal_result="${8:-0}"
+  local stage_label="${9:-$role}" context_file="${10:-}"
 
   # --agent만 지정되고 --model이 없을 때: agent 기본 모델 자동 선택
   if [ -n "$tool" ] && [ -z "$model" ]; then
@@ -416,7 +451,7 @@ run_quick_mode() {
   log "quick mode: $role $tool:$model"
   log_event "$state_dir" "QUICK_CALL role=$role tool=$tool model=$model"
 
-  local prompt_file="$state_dir/prompt-quick-$role.md"
+  local prompt_file="$state_dir/prompt-quick-$stage_label.md"
   cat > "$prompt_file" <<EOF
 $(cat "$task_md")
 
@@ -434,6 +469,7 @@ Agents modify only their own workspace. Do not modify other agent folders.
 역할:
 $role 역할만 수행하세요.
 $(if [ "$role" = "review" ]; then echo "현재 변경을 읽기 전용으로 검토하세요. 파일을 수정하지 마세요."; fi)
+$(if [ -n "$context_file" ] && [ -f "$context_file" ]; then cat "$context_file"; fi)
 
 ---
 
@@ -496,11 +532,20 @@ EOF
   local json_path="${output##*|}"
 
   log_event "$state_dir" "QUICK_VERDICT verdict=$verdict"
+  write_stage_result "$state_dir" "$stage_label" "$verdict" "$json_path"
 
-  if [ "$verdict" != "PASS" ]; then
-    fail_run "$state_dir" "QUICK_VERDICT_$verdict" "verdict=$verdict not PASS"
-    return 1
-  fi
+  # 역할별 허용 verdict. review만 CHANGES_REQUESTED를 정상적인 리뷰 완료로
+  # 취급한다 — 그 외 모든 역할, 그리고 review의 BLOCKED/INVALID_OUTPUT은
+  # 여전히 실행 실패다. (fallback은 adapter/infra 장애 복구이고, 여기서
+  # 다루는 CHANGES_REQUESTED는 코드 품질 판정이므로 서로 섞지 않는다.)
+  case "$role:$verdict" in
+    review:PASS|review:CHANGES_REQUESTED) ;;
+    *:PASS) ;;
+    *)
+      fail_run "$state_dir" "QUICK_VERDICT_$verdict" "verdict=$verdict not PASS"
+      return 1
+      ;;
+  esac
 
   if [ "$role" != "review" ]; then
     local missing_files
@@ -538,20 +583,103 @@ EOF
 
 run_quick_chain() {
   local task_md="$1" state_dir="$2" worktree="$3" agent_chain="$4"
-  local chain_copy="$agent_chain" stage=0
-  local roles=(implement review repair)
 
-  while [ -n "$chain_copy" ]; do
-    local pair="${chain_copy%%,*}"
+  # ---------------------------------------------------------------------
+  # 정확히 세 개의 tool:model 파싱 (기존 CLI 형식 그대로 유지)
+  # ---------------------------------------------------------------------
+  local pairs=() rest="$agent_chain"
+  while [ -n "$rest" ]; do
+    local pair="${rest%%,*}"
     local tool="${pair%%:*}" model="${pair#*:}"
     [ "$tool" != "$model" ] || { fail_run "$state_dir" "INVALID_CHAIN" "expected tool:model, got $pair"; return 1; }
-    [ "$stage" -lt 3 ] || { fail_run "$state_dir" "INVALID_CHAIN" "quick chain must contain exactly three agents"; return 1; }
-    run_quick_mode "$task_md" "$tool" "$model" "$state_dir" "$worktree" "${roles[$stage]}" 0 1 || return 1
-    stage=$((stage + 1))
-    if [ "$chain_copy" = "$pair" ]; then chain_copy=""; else chain_copy="${chain_copy#*,}"; fi
+    pairs+=("$pair")
+    if [ "$rest" = "$pair" ]; then rest=""; else rest="${rest#*,}"; fi
   done
+  [ "${#pairs[@]}" = "3" ] || { fail_run "$state_dir" "INVALID_CHAIN" "quick chain requires implement, review, repair"; return 1; }
 
-  [ "$stage" = "3" ] || { fail_run "$state_dir" "INVALID_CHAIN" "quick chain requires implement, review, repair"; return 1; }
+  local implement_pair="${pairs[0]}" review_pair="${pairs[1]}" repair_pair="${pairs[2]}"
+  local implement_tool="${implement_pair%%:*}" implement_model="${implement_pair#*:}"
+  local review_tool="${review_pair%%:*}" review_model="${review_pair#*:}"
+  local repair_tool="${repair_pair%%:*}" repair_model="${repair_pair#*:}"
+
+  # ---------------------------------------------------------------------
+  # IMPLEMENT
+  # ---------------------------------------------------------------------
+  log_event "$state_dir" "CHAIN_STAGE_STARTED stage=implement"
+  run_quick_mode "$task_md" "$implement_tool" "$implement_model" "$state_dir" "$worktree" implement 0 1 implement || return 1
+  log_event "$state_dir" "CHAIN_STAGE_COMPLETED stage=implement verdict=PASS"
+
+  # ---------------------------------------------------------------------
+  # INITIAL REVIEW
+  # ---------------------------------------------------------------------
+  log_event "$state_dir" "CHAIN_STAGE_STARTED stage=review-initial"
+  run_quick_mode "$task_md" "$review_tool" "$review_model" "$state_dir" "$worktree" review 0 1 review-initial || return 1
+
+  local initial_review_verdict initial_review_json
+  initial_review_verdict="$(cat "$state_dir/stage-review-initial.verdict" 2>/dev/null || echo "")"
+  initial_review_json="$(cat "$state_dir/stage-review-initial.json-path" 2>/dev/null || echo "")"
+  log_event "$state_dir" "CHAIN_REVIEW_DECISION verdict=$initial_review_verdict"
+
+  case "$initial_review_verdict" in
+    PASS)
+      log_event "$state_dir" "CHAIN_REPAIR_SKIPPED reason=review_pass"
+      ;;
+    CHANGES_REQUESTED)
+      if [ -z "$initial_review_json" ] || [ ! -s "$initial_review_json" ]; then
+        fail_run "$state_dir" "STAGE_CONTEXT_MISSING" "initial review verdict=CHANGES_REQUESTED but no stage JSON captured"
+        return 1
+      fi
+      log_event "$state_dir" "CHAIN_REPAIR_REQUIRED"
+
+      # -------------------------------------------------------------
+      # REPAIR — 이전 리뷰 JSON을 원본 그대로 프롬프트에 첨부
+      # -------------------------------------------------------------
+      local repair_context="$state_dir/context-repair.md"
+      {
+        printf -- '---\n## 이전 리뷰 결과\n아래 JSON은 직전 read-only reviewer의 판정이다.\n- findings의 각 항목을 확인한다.\n- 관련 없는 파일을 재작성하지 않는다.\n- 해결하지 못한 항목은 숨기지 말고 risks 또는 notes_for_reviewer에 남긴다.\n- 리뷰 결과 자체를 수정하거나 삭제하지 않는다.\n\n'
+        cat "$initial_review_json"
+        printf '\n'
+      } > "$repair_context"
+
+      run_quick_mode "$task_md" "$repair_tool" "$repair_model" "$state_dir" "$worktree" repair 0 1 repair "$repair_context" || return 1
+      log_event "$state_dir" "CHAIN_REPAIR_COMPLETED"
+
+      local repair_json
+      repair_json="$(cat "$state_dir/stage-repair.json-path" 2>/dev/null || echo "")"
+
+      # -------------------------------------------------------------
+      # FINAL REVIEW — 같은 reviewer 재사용, 최초 리뷰 + repair 결과를 함께 전달
+      # -------------------------------------------------------------
+      log_event "$state_dir" "CHAIN_FINAL_REVIEW_STARTED"
+      local final_review_context="$state_dir/context-review-final.md"
+      {
+        printf -- '---\n## 최초 리뷰 결과\n\n'
+        cat "$initial_review_json"
+        printf -- '\n\n## repair 수행 결과\n\n'
+        if [ -n "$repair_json" ] && [ -f "$repair_json" ]; then cat "$repair_json"; fi
+        printf -- '\n\n## 최종 리뷰 지시\n- 최초 findings가 실제 코드에서 해결됐는지 확인한다.\n- repair가 만든 새 회귀를 확인한다.\n- 해결되지 않은 finding이 하나라도 있으면 CHANGES_REQUESTED를 반환한다.\n- JSON만 믿지 말고 worktree의 실제 diff를 직접 읽어 확인한다.\n'
+      } > "$final_review_context"
+
+      run_quick_mode "$task_md" "$review_tool" "$review_model" "$state_dir" "$worktree" review 0 1 review-final "$final_review_context" || return 1
+
+      local final_review_verdict
+      final_review_verdict="$(cat "$state_dir/stage-review-final.verdict" 2>/dev/null || echo "")"
+
+      if [ "$final_review_verdict" != "PASS" ]; then
+        log_event "$state_dir" "CHAIN_FINAL_REVIEW_REJECTED verdict=$final_review_verdict"
+        fail_run "$state_dir" "REVIEW_NOT_CLEARED" "final review verdict=$final_review_verdict after repair — commit blocked, worktree/결과 보존"
+        return 1
+      fi
+      log_event "$state_dir" "CHAIN_FINAL_REVIEW_CLEARED"
+      ;;
+    *)
+      # BLOCKED/INVALID_OUTPUT은 run_quick_mode의 verdict 게이트가 이미
+      # fail_run으로 처리했어야 하므로 여기 도달하면 방어적으로만 처리한다.
+      fail_run "$state_dir" "QUICK_VERDICT_${initial_review_verdict:-UNKNOWN}" "unexpected review verdict"
+      return 1
+      ;;
+  esac
+
   if [ "$AUTO_COMMIT" = "1" ]; then
     local task_title
     task_title="$(head -1 "$task_md" | sed 's/^#\s*//')"
