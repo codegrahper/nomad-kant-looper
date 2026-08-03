@@ -19,6 +19,16 @@
 
 ## 백그라운드 실행 (`--detach`)과 완료 확인
 
+**왜 `--detach`가 기본인가**: Claude Code의 Bash 도구는 동기 blocking 호출에
+기본 120초, 최대 600초(600000ms)까지만 대기한다. 반면 kant-loop.sh 내부 role별
+timeout은 plan/verify 600초, review 900초, implement/repair 1800초다(기본
+role은 implement). 즉 `--detach` 없이 그냥 `run`을 부르면(foreground), 작업이
+조금만 길어져도 kant-loop.sh 자체 timeout이 걸리기 전에 Bash 도구 쪽이 먼저
+호출을 끊어버릴 수 있다 — 이 시점엔 하위 프로세스가 실제로 죽었는지, 계속
+도는지, 완료됐는지 이 런타임에서 신뢰성 있게 확인할 방법이 없다. foreground가
+금지는 아니지만 매번 도박이라, plan/verify처럼 확실히 짧게 끝나는 경우가
+아니면 `--detach → await`를 기본으로 쓴다.
+
 `--detach`는 사람에게 macOS 알림을 줄 뿐 Claude Code에게는 아무 신호도 오지
 않는다. `--detach`로 던진 뒤 바로 이어서 `await <run_id>`를 **Bash 도구의
 `run_in_background: true`**로 호출해야 완료 시 하네스가 Claude를 깨운다.
@@ -55,7 +65,7 @@ Claude Code의 `Bash(...)` glob 권한 문법은 `SKILL.md` 프론트매터에 �
 | Skill 발견 (Skill Discovery) | native | `~/.claude/skills/nomad-kant-looper` worktree에서 로드됨이 관측됨 |
 | 구조화된 선택 UI (graceful degradation) | native | 구조화된 선택 UI(AskUserQuestion류)로 도구/모델 선택이 관측됨 |
 | `$SKILL_DIR` 해석 | native | `~/.claude/skills/nomad-kant-looper`로 정상 해석됨이 관측됨 |
-| foreground 백엔드 호출 | native | Bash 도구로 `kant-loop.sh run` 실행이 관측됨 |
+| foreground 백엔드 호출 | native (비권장) | Bash 도구로 `kant-loop.sh run` 실행이 관측됨. 단 role timeout이 Bash 도구 상한(최대 600초)을 넘을 수 있어 기본 경로로 쓰지 않음 — 위 절 참고 |
 | background 실행 (`--detach`) | native | `--detach`로 run_id 즉시 반환됨이 관측됨 |
 | 완료 wake-up (background 완료 알림) | native | `await`를 Bash `run_in_background:true`로 호출 시 하네스가 깨움이 관측됨 |
 | permission 모델 | native | `allowed-tools` glob 권한 문법(`Bash(...)`) 동작이 관측됨 |
