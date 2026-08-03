@@ -331,24 +331,25 @@ Model: <선택된 모델>
 
 `$task_file`은 위 규칙대로 만든 `TASK-<slug>.md` 경로다.
 
-실행 명령 (기본, foreground):
-```bash
-bash "$SKILL_DIR/scripts/kant-loop.sh" run "$task_file" --quick --agent "$tool" --model "$model"
-```
-foreground 실행은 Bash 도구 호출 자체가 완료까지 블로킹하므로 별도 콜백 설정이
-필요 없다 — 호출이 끝나면 그 결과가 곧 완료 통지다. 이 동작은 모든 Runtime에서
-동일하다.
-
-**`--detach`를 쓰는 경우(장시간 작업 등)**: 백그라운드 실행 지원 여부와 완료를
-확인하는 방법, 알려진 신뢰성 이슈는 Runtime마다 다르다 — `platform/<runtime>.md`
-참고. 기본은 항상 foreground 실행이다.
-
+실행 명령 (기본, `--detach` → `await`):
 ```bash
 bash "$SKILL_DIR/scripts/kant-loop.sh" run "$task_file" --quick --agent "$tool" --model "$model" --detach
 # → run_id 즉시 반환
 # 완료를 확인하는 방법은 Runtime마다 다르다 — platform/<runtime>.md 참고.
 bash "$SKILL_DIR/scripts/kant-loop.sh" await "$run_id"
 ```
+
+**왜 `--detach`가 기본인가**: kant-loop.sh 내부 role별 timeout(plan/verify
+600초, review 900초, implement/repair 1800초 — `scripts/lib/timeout-runner.sh`
+참고)이 Bash 도구 자체의 동기 blocking 호출 상한보다 긴 경우가 흔하다. 기본
+role인 implement가 바로 이 경우다. 정확한 상한 수치와 우회 방법은 Runtime마다
+다르다 — `platform/<runtime>.md` 참고.
+
+**foreground(`--detach` 없이 그냥 `run`)**: 금지된 건 아니지만, 작업이 Bash
+도구 상한 안에서 끝난다는 보장이 없는 한 매번 도박이다 — 길어지면 kant-loop.sh의
+내부 timeout이 걸리기 전에 Bash 도구 쪽이 먼저 끊길 수 있고, 그 시점부터는
+하위 프로세스 상태와 완료 여부를 신뢰성 있게 확인할 방법이 없다. plan/verify처럼
+확실히 짧게 끝난다고 알고 있는 경우가 아니면 기본 경로로 쓰지 않는다.
 
 이후 Meta Agent의 역할은 종료된다.
 
@@ -688,7 +689,7 @@ kant-loop.sh cleanup --apply
 
 인증 실패 / timeout / rate limit / 형식 오류 / 네트워크 에러 — 모든 실패 모드에 즉시 대응. 실패한 모델이 속한 난이도 티어(T0~T3)의 다른 provider부터 자동 시도하고, **claude가 마지막 폴백**이라 작업이 중단되는 일은 거의 없음.
 
-상세(현행): `references/fallback-table.md`. 과거 HPRAR 실패모드 설계는 historical로 `references/archive/hprar/failure-modes.md`.
+상세(현행): `references/fallback-table.md`.
 
 ### 무진전 처리 (timeout 기반)
 
@@ -696,8 +697,6 @@ kant-loop.sh cleanup --apply
 중단하는 no-progress detector가 있었으나 **v0.8에서 제거**됐다 — 호출하는 곳이 전혀 없는
 죽은 코드였다. 현재는 role별 timeout(구현·수정 30분, 검토 15분 등)과 fallback 체인 소진만으로
 무한 루프를 막는다. 별도의 diff/테스트 반복 감지는 없다.
-
-과거 정책의 historical 기록: `references/archive/hprar/failure-modes.md`.
 
 ### 수동 복구 subsystem (self-repair)
 
@@ -742,10 +741,7 @@ $SKILL_DIR/                                       # Runtime별 실제 경로는 
 │   ├── fallback-table.md                         # 티어/fallback 체인 (코드와 동기)
 │   ├── safety-promises.md                        # 안전 약속 전체
 │   ├── agy-cli-notes.md                          # agy(Antigravity) CLI 실전 노트
-│   ├── archive/                                  # historical (HPRAR 설계, 지난 계획) — 현행 아님
-│   │   ├── hprar/                                #   loop-flow / verdict-schema / failure-modes
-│   │   └── plans/                                #   PLAN-lightweight-kant-looper-v0.6.md 등
-│   └── postmortems/                              # 사후 분석 기록
+│   └── self-repair-subsystem.md                  # 수동 복구 subsystem (자동 호출 아님)
 ├── scripts/
 │   ├── kant-loop.sh                              # 메인 백엔드
 │   ├── adapters/                                 # Worker Provider 축: 5개 어댑터 (codex/grok/opencode/agy/claude)
@@ -767,4 +763,4 @@ $SKILL_DIR/                                       # Runtime별 실제 경로는 
 > 7. **칸트는 냉정합니다**. verdict는 verdict대로. 감정/사정 개입 없이 원칙만으로 결정.
 
 현행 backend 동작의 SSOT는 `scripts/kant-loop.sh` 코드 자체다. 과거 HPRAR 라운드/상태머신
-설계는 현행이 아니며 historical 기록으로 `references/archive/hprar/loop-flow.md`에 남아 있다.
+설계는 현행이 아니며, 관련 historical 문서는 2026-07-25에 저장소에서 제거됐다(git 히스토리에만 남음).

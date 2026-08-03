@@ -114,7 +114,8 @@ kant-loop.sh run TASK.md --quick --agent <tool> --model <model>
 
 성공 판정은 자연어 "완료했습니다"가 아니라 위 verdict와 실제 git diff 존재
 여부로 한다(`verify_changed_files`, `do_safety_check`, `gate-runner.sh`).
-verdict 스키마 상세는 `references/archive/hprar/verdict-schema.md` 참고.
+verdict 스키마의 실질 SSOT는 `scripts/lib/verdict-extractor.sh`의
+`check_required_fields()`다 — role별 필수 필드가 거기 정의돼 있다.
 
 ---
 
