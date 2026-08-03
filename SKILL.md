@@ -165,6 +165,7 @@ Nomad Kant Looper, 칸트와 유랑하세요. 👋
 - `opencode:MiniMax-M3` (1M 컨텍스트, 장기 에이전트)
 - `opencode:glm-4.7` (legacy/emergency 전용 — 정상 자동 라우팅 제외, 명시 호출은 계속 지원)
 - `opencode:MiniMax-M2.7` (legacy/emergency 전용 — 정상 자동 라우팅 제외, 명시 호출은 계속 지원)
+- `opencode:Kimi-K3` (Moonshot AI, opencode-go 프로바이더 — 신규·실측 검증 전, 명시 호출만 지원하고 T0~T3 자동 라우팅에는 없음)
 
 **Grok:**
 - `grok:grok-4.5` (터미널, Rust/C/C++, 풀스택, 빠른 도구 루프)
@@ -211,6 +212,7 @@ nomad-kant-looper는 내부적으로 짧은 ID(`gemini-3.6-flash`)를 그대로 
 ```bash
 kant-loop.sh run TASK.md --quick --agent opencode --model MiniMax-M3
 kant-loop.sh run TASK.md --quick --agent opencode --model MiniMax-M2.7
+kant-loop.sh run TASK.md --quick --agent opencode --model Kimi-K3
 ```
 
 모델 선택 후 선택된 내용을 확인하고 진행한다.

@@ -72,6 +72,7 @@ call() {
 
   local glm_provider="${KANT_OPENCODE_GLM_PROVIDER:-zai-coding-plan}"
   local minimax_provider="${KANT_OPENCODE_MINIMAX_PROVIDER:-opencode-go}"
+  local kimi_provider="${KANT_OPENCODE_KIMI_PROVIDER:-opencode-go}"
   local normalized_model="$model"
   if ! printf '%s' "$model" | grep -q '/'; then
     case "$model" in
@@ -83,6 +84,9 @@ call() {
         ;;
       MiniMax-M2.7)
         normalized_model="${minimax_provider}/minimax-m2.7"
+        ;;
+      Kimi-K3)
+        normalized_model="${kimi_provider}/kimi-k3"
         ;;
       *)
         # 알 수 없는 bare 이름은 로그만 남기고 그대로 시도 (다른 프로바이더일 수 있음)
