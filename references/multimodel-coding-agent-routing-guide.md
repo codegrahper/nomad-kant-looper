@@ -29,11 +29,20 @@
 | `MiniMax-M3` | 1M 컨텍스트, 장기 에이전트 작업 | 대형 저장소·장기 작업 (glm-5.2 대안) | PRIMARY_EFFICIENT |
 | `glm-4.7` | 실용형, 200K 컨텍스트, 비용·품질 균형 | 일상 개발 (명시 호출만) | LEGACY_EMERGENCY |
 | `MiniMax-M2.7` | 일반 코딩, 비용 균형 | 일상 개발 (명시 호출만) | LEGACY_EMERGENCY |
+| `Kimi-K3` | Moonshot AI, opencode-go 프로바이더 | 실측 검증 전 (명시 호출만) | UNVERIFIED_EXPLICIT_ONLY |
 
 `glm-4.7`/`MiniMax-M2.7`은 2026-07-24부터 정상 자동 라우팅·fallback에서
 제외됐다 (삭제 아님 — `--agent opencode --model glm-4.7` 등 명시 호출은 계속
 지원, `KANT_ENABLE_LEGACY_FALLBACK=1`일 때만 emergency로 편입). 자세한 내용은
 `references/fallback-table.md` 참고.
+
+`Kimi-K3`는 2026-08-03에 opencode-go 프로바이더 모델로 추가됐다. glm-4.7 등
+legacy 모델과 달리 예전에 primary였다가 격하된 게 아니라 **신규 모델이라
+아직 실측 데이터가 없는** 경우다 — 그래서 legacy emergency pool에도 넣지
+않고, T0~T3 자동 라우팅 티어 풀에도 넣지 않았다. `--agent opencode --model
+Kimi-K3`로 명시 호출만 가능하고, 실패 시 `references/fallback-table.md`의
+전용 고정 체인(codex → agy → grok → claude)으로 넘어간다. 실측이 쌓이면
+사용자 승인 하에 PRIMARY_EFFICIENT 티어 편입을 재검토한다.
 
 주의(2026-07-18 실측): 같은 조합(opencode + 같은 태스크)에서 glm-4.7이 verdict
 JSON을 누락하는 사례가 보고됐으나, 독립 재현 시 2/2 정상 통과해 재현이
@@ -141,6 +150,10 @@ verdict 스키마 상세는 `references/archive/hprar/verdict-schema.md` 참고.
 - 모델 목록: https://platform.minimax.io/docs/guides/models-intro
 - M3 발표: https://www.minimax.io/blog/minimax-m3
 - M2.7: https://www.minimax.io/models/text/m27
+
+### Moonshot AI (Kimi)
+- 공식 출처 미확정 — 확인되면 추가한다. opencode-go 프로바이더를 통해서만
+  호출한다(`references/fallback-table.md` 참고).
 
 ---
 

@@ -88,6 +88,29 @@ Bridge / dashboard/web = Eyes**. Phase 3 완료 지점에서 한 번 평가하�
   Technical Reference 예시 갱신), `README.md`("빠른 시작" 절), `.gitignore`
   (`TASK-*.md`류 스크래치 파일이 실수로 커밋되지 않도록 패턴 추가).
 
+### OpenCode `Kimi-K3` 모델 추가 (2026-08-03, 명시 호출 전용)
+
+- opencode-go 프로바이더의 신규 모델 `Kimi-K3`(Moonshot AI)를 등록. glm-4.7/
+  MiniMax-M2.7 같은 legacy 모델과 달리 예전에 primary였다가 격하된 게 아니라,
+  **신규 추가라 아직 실측 데이터가 없는** 경우라 `UNVERIFIED_EXPLICIT_ONLY`라는
+  별도 등급으로 분류 — `KANT_LEGACY_EMERGENCY_POOL`에도, T0~T3 자동 라우팅
+  티어 풀에도 넣지 않았다. `--agent opencode --model Kimi-K3` 명시 호출만
+  지원하고, 실패 시 `references/fallback-table.md`의 전용 고정 체인
+  (codex → agy → grok → claude)으로만 넘어간다.
+- 변경 파일: `scripts/lib/model-selector.sh`(선택 가능 모델 목록),
+  `scripts/kant-loop.sh`(`validate_agent_model_compatibility` — opencode
+  허용 목록에 추가, claude 쪽은 MiniMax와 함께 명시적으로 거부해 OpenCode
+  전용 모델이 claude로 새는 걸 막음), `scripts/adapters/adapter-opencode.sh`
+  (`Kimi-K3` → `opencode-go/kimi-k3` bare-name 정규화),
+  `scripts/lib/fallback-dispatcher.sh`(`KANT_FALLBACK_CHAINS_LINEAR`에 특수
+  케이스 추가), `scripts/tests/test-agent-default-models.sh`(호환성 테스트
+  추가), `SKILL.md`·`references/multimodel-coding-agent-routing-guide.md`·
+  `references/fallback-table.md`(문서 반영).
+- 검증: `test-agent-default-models.sh` 40/40, `test-tier-fallback-chain.sh`
+  26/26, `test-minimax-routing.sh` 50/50 — 기존 회귀 없음, Kimi-K3가 자동
+  라우팅 티어에 새지 않음을 확인.
+- 공식 출처 미확정 — 확인되면 라우팅 가이드 §5에 추가.
+
 ## [0.8.0] — 2026-07-21 — Portable Runtime Hardening
 
 v0.7.0(Host Contract 정의)을 실제로 닫는 릴리스. 새 오케스트레이션 기능을

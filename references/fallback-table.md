@@ -19,6 +19,9 @@ ESCALATION
 LEGACY_EMERGENCY
 - glm-4.7
 - MiniMax-M2.7
+
+UNVERIFIED_EXPLICIT_ONLY
+- Kimi-K3
 ```
 
 `LEGACY_EMERGENCY`는 **삭제가 아니다**. `glm-4.7`/`MiniMax-M2.7`은 `model-selector.sh`에
@@ -31,6 +34,14 @@ LEGACY_EMERGENCY
 glm-4.7은 실측에서 산출물은 정상인데 verdict parsing이 실패(`INVALID_OUTPUT`)한 사례가
 있어, emergency 편입 시에도 실패한 원본 모델 자신은 재삽입하지 않고 즉시 다음 모델로
 넘어간다.
+
+`UNVERIFIED_EXPLICIT_ONLY`(2026-08-03 신설, `Kimi-K3`)는 `LEGACY_EMERGENCY`와 다르다 —
+legacy는 예전에 primary였다가 격하된 모델이고, 이쪽은 **신규 추가라 아직 실측 데이터가
+없는** 모델이다. 그래서 `KANT_LEGACY_EMERGENCY_POOL`(위 `LEGACY_EMERGENCY` 참고)에도
+넣지 않았고, `KANT_ENABLE_LEGACY_FALLBACK=1`로도 자동 편입되지 않는다. 오직
+`--agent opencode --model Kimi-K3` 명시 호출만 지원하며, 실패 시 아래
+`special_cases`의 전용 고정 체인으로만 넘어간다. 실측이 쌓이면 사용자 승인 하에
+PRIMARY_EFFICIENT(T0~T3 티어 풀) 편입을 재검토한다.
 
 ## 코드 매핑 (script에서 사용)
 
@@ -80,6 +91,7 @@ special_cases:
   claude:default: [claude:default]  # 자기 자신 self-loop, 더 갈 곳 없음
   opencode:glm-4.7: [codex:gpt-5.6-terra, agy:gemini-3.6-flash, grok:grok-4.5, claude:default]        # legacy 명시 호출 실패 시
   opencode:MiniMax-M2.7: [codex:gpt-5.6-terra, agy:gemini-3.6-flash, grok:grok-4.5, claude:default]   # legacy 명시 호출 실패 시
+  opencode:Kimi-K3: [codex:gpt-5.6-terra, agy:gemini-3.6-flash, grok:grok-4.5, claude:default]        # 신규·미검증 모델 명시 호출 실패 시
   agy:gemini-3.5-flash: [agy:gemini-3.6-flash, opencode:glm-5.2, claude:default]  # 이전 기본값 명시 호출 호환
 ```
 

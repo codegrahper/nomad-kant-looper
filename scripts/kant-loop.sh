@@ -350,9 +350,9 @@ validate_agent_model_compatibility() {
     opencode)
       if ! echo "$model" | grep -qE '^glm-'; then
         case "$model" in
-          MiniMax-M3|MiniMax-M2.7) ;;
+          MiniMax-M3|MiniMax-M2.7|Kimi-K3) ;;
           *)
-            echo "ERROR: opencode requires glm-* or a supported MiniMax model, got '$model'" >&2
+            echo "ERROR: opencode requires glm-* or a supported MiniMax/Kimi model, got '$model'" >&2
             return 1
             ;;
         esac
@@ -377,8 +377,8 @@ validate_agent_model_compatibility() {
       fi
       ;;
     claude)
-      if echo "$model" | grep -qE '^MiniMax-'; then
-        echo "ERROR: claude does not support MiniMax models" >&2
+      if echo "$model" | grep -qE '^MiniMax-|^Kimi-'; then
+        echo "ERROR: claude does not support MiniMax/Kimi models (OpenCode 전용)" >&2
         return 1
       fi
       ;;

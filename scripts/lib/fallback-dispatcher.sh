@@ -31,15 +31,19 @@ FALLBACK_LOG="${KANT_FALLBACK_LOG:-${KANT_STATE_ROOT:-$HOME/.claude/state/nomad-
 #     KANT_ENABLE_LEGACY_FALLBACK=1일 때만 primary pool 소진 후 emergency로 편입됨 (기본값 0).
 #     glm-4.7/MiniMax-M2.7 삭제 아님 — SUPPORTED ≠ PRIMARY ≠ AUTOMATIC FALLBACK.
 #
-# 특수 케이스 고정 테이블 (2026-07-24, T0~T3 티어 재설계 이후에도 유지)
+# 특수 케이스 고정 테이블 (2026-07-24, T0~T3 티어 재설계 이후에도 유지 / 2026-08-03 Kimi-K3 추가)
 # ---------------------------------------------------------------------------
-# 아래 4개 항목은 "정상 primary 8종"(codex 3 + opencode glm-5.2/MiniMax-M3 +
+# 아래 5개 항목은 "정상 primary 8종"(codex 3 + opencode glm-5.2/MiniMax-M3 +
 # agy gemini-3.6-flash + grok-4.5)이 아니라 특수 케이스이므로, 티어 시스템이
 # 아니라 이 고정 테이블이 그대로 처리한다:
 #   - claude|default: 자기 자신 self-loop (claude가 최종 폴백이라 더 갈 곳 없음)
 #   - opencode|glm-4.7, opencode|MiniMax-M2.7: legacy — 명시 호출이 실패했을 때의
 #     전용 폴백. 정상 primary pool에서 자동으로 선택되지 않으므로 티어 테이블에
 #     넣지 않는다.
+#   - opencode|Kimi-K3: 신규(2026-08-03, opencode-go 프로바이더) — 아직 실측
+#     검증 전이라 자동 라우팅(T0~T3 티어 풀)에는 넣지 않는다. 명시 호출
+#     (`--agent opencode --model Kimi-K3`)만 지원하고, 실패 시에만 이 고정
+#     체인으로 넘어간다.
 #   - agy|gemini-3.5-flash: 이전 기본값 — 명시 호출 호환용 폴백만 유지.
 # 정상 primary 8종의 체인은 get_tier_fallback_chain()이 T0~T3 풀에서 자동 생성한다
 # (아래 KANT_TIER_POOLS 참고, references/multimodel-coding-agent-routing-guide.md
@@ -47,6 +51,7 @@ FALLBACK_LOG="${KANT_FALLBACK_LOG:-${KANT_STATE_ROOT:-$HOME/.claude/state/nomad-
 declare -a KANT_FALLBACK_CHAINS_LINEAR=(
   "opencode|glm-4.7|codex|gpt-5.6-terra|agy|gemini-3.6-flash|grok|grok-4.5|claude|default"
   "opencode|MiniMax-M2.7|codex|gpt-5.6-terra|agy|gemini-3.6-flash|grok|grok-4.5|claude|default"
+  "opencode|Kimi-K3|codex|gpt-5.6-terra|agy|gemini-3.6-flash|grok|grok-4.5|claude|default"
   "agy|gemini-3.5-flash|agy|gemini-3.6-flash|opencode|glm-5.2|claude|default"
   "claude|default|claude|default"
 )
