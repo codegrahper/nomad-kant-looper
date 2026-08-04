@@ -49,6 +49,9 @@ NOTIFY_OSASCRIPT="${KANT_NOTIFY_OSASCRIPT:-1}"
 PROTECTED_PATHS_DEFAULT='.git .env .env.local .env.*.local *.pem *.key *credential* *secret* *password* node_modules dist build __pycache__ .venv'
 PROTECTED_PATHS="${PROTECTED_PATHS:-$PROTECTED_PATHS_DEFAULT}"
 MAX_FILE_BYTES="${KANT_MAX_FILE_BYTES:-10485760}"
+# detach 시작 handshake 최대 대기(초). 자식이 이 시간 안에 _run_mode 에 진입하지
+# 못하면 즉사로 판정하고 terminal state 를 남긴다.
+DETACH_HANDSHAKE_TIMEOUT="${KANT_DETACH_HANDSHAKE_TIMEOUT:-15}"
 
 mkdir -p "$STATE_ROOT"
 
@@ -115,6 +118,28 @@ fail_run() {
 
   notify_macos "nomad-kant-looper: failed" "$code - $message"
   return 1
+}
+
+# ---------------------------------------------------------------------------
+# detached worker 종료 보장
+#
+# detached worker 가 어떤 경로로 죽든(정상 return, set -e 중단, 시그널) run 이
+# terminal state 없이 남지 않도록 보장한다. terminal state 가 없으면 await 가
+# 죽은 프로세스를 감지하지 못하고 timeout 까지 헛대기한다(2026-08-04 회귀).
+#
+# trap 본문에서 참조하므로 state_dir 은 반드시 전역에 둔다 — _run_mode 의 local
+# 변수는 EXIT trap 이 도는 시점에 스코프 밖일 수 있고, set -u 에서 그대로 에러가 된다.
+# ---------------------------------------------------------------------------
+
+KANT_WORKER_STATE_DIR=""
+
+_worker_finalize() {
+  local state_dir="${1:-}" reason="${2:-exit}"
+  [ -n "$state_dir" ] || return 0
+  [ -d "$state_dir" ] || return 0
+  [ -f "$state_dir/result.txt" ] && return 0
+  fail_run "$state_dir" "WORKER_DIED" "detached worker ended without terminal result ($reason)" || true
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -507,6 +532,10 @@ EOF
     fail_run "$state_dir" "ADAPTER_MISSING" "adapter not found: $adapter"
     return 1
   fi
+
+  # 어댑터 진입 시점을 남긴다 — 중단이 kant-loop 쪽인지 외부 도구 쪽인지
+  # 사후에 구분할 수 있어야 한다.
+  log_event "$state_dir" "ADAPTER_STARTED role=$role tool=$tool model=$model"
 
   # set -e 안전 패턴 (command substitution 실패 시에도 rc 검출)
   local output rc=0
@@ -1034,9 +1063,47 @@ cmd_run() {
 
   if [ "$detach" = "1" ]; then
     log "detach mode — running in background"
-    nohup "$SCRIPT_DIR/kant-loop.sh" _run_mode "$mode" "$task_md" "$state_dir" "$worktree" "$tool" "$model" "$agent_chain" "$role" > "$state_dir/detached.log" 2>&1 &
+    rm -f "$state_dir/worker-started"
+    # 자식에게는 원본 TASK 경로가 아니라 위에서 이미 복사해 둔 스냅샷을 넘긴다.
+    # 백그라운드로 도는 동안 원본이 수정·이동·삭제돼도 작업지시가 흔들리지 않는다.
+    nohup "$SCRIPT_DIR/kant-loop.sh" _run_mode "$mode" "$state_dir/task.md" "$state_dir" "$worktree" "$tool" "$model" "$agent_chain" "$role" > "$state_dir/detached.log" 2>&1 &
     local detached_pid=$!
     echo "$detached_pid" > "$state_dir/detached.pid"
+
+    # 시작 handshake — PID 를 띄웠다는 사실만으로 성공을 반환하지 않는다.
+    # 자식이 즉시 죽으면 실패 상태가 기록되지 않아 await 가 timeout 까지
+    # 헛대기했다(2026-08-04 회귀). 여기서 실제 진입을 확인하고 넘어간다.
+    local hs_waited=0 hs_ok=0
+    while [ "$hs_waited" -lt "$DETACH_HANDSHAKE_TIMEOUT" ]; do
+      if [ -f "$state_dir/worker-started" ]; then hs_ok=1; break; fi
+      if ! kill -0 "$detached_pid" 2>/dev/null; then
+        # 죽기 직전에 마커를 남겼을 수 있으니 한 번 더 확인한다(경합 방지).
+        [ -f "$state_dir/worker-started" ] && hs_ok=1
+        break
+      fi
+      sleep 1
+      hs_waited=$((hs_waited + 1))
+    done
+
+    if [ "$hs_ok" != "1" ]; then
+      # 시작도 못 한 워커가 뒤늦게 살아나 커밋까지 진행하는 일이 없도록 정리한다.
+      if kill -0 "$detached_pid" 2>/dev/null; then
+        kill -TERM "$detached_pid" 2>/dev/null || true
+        sleep 1
+      fi
+      if [ ! -f "$state_dir/result.txt" ]; then
+        local hs_detail=""
+        hs_detail="$(tail -n 5 "$state_dir/detached.log" 2>/dev/null | tr '\n' ' ' || true)"
+        fail_run "$state_dir" "DETACH_HANDSHAKE_FAILED" \
+          "worker pid=$detached_pid did not start within ${DETACH_HANDSHAKE_TIMEOUT}s: ${hs_detail:-no output}" || true
+      fi
+      echo "run_id: $run_id"
+      echo "state_dir: $state_dir"
+      echo "detach 실패: 백그라운드 워커가 시작되지 못했습니다."
+      echo "로그: $state_dir/detached.log"
+      exit 1
+    fi
+
     echo "run_id: $run_id"
     echo "state_dir: $state_dir"
     echo "branch: $branch"
@@ -1117,6 +1184,20 @@ create_worktree() {
 _run_mode() {
   local mode="$1" task_md="$2" state_dir="$3" worktree="$4" tool="$5" model="$6" agent_chain="$7" role="${8:-implement}"
   local rc=0
+
+  # terminal state 보장을 가장 먼저 건다 — 아래 어느 줄에서 죽어도 run 이
+  # result.txt 없이 남지 않도록. (trap 설정 전에 죽으면 그 구멍이 그대로 회귀다.)
+  KANT_WORKER_STATE_DIR="$state_dir"
+  trap 'kant_err_rc=$?; log_event "$KANT_WORKER_STATE_DIR" "WORKER_ERR rc=$kant_err_rc line=$LINENO" || true' ERR
+  trap '_worker_finalize "$KANT_WORKER_STATE_DIR" "signal HUP"; exit 129' HUP
+  trap '_worker_finalize "$KANT_WORKER_STATE_DIR" "signal INT"; exit 130' INT
+  trap '_worker_finalize "$KANT_WORKER_STATE_DIR" "signal TERM"; exit 143' TERM
+  trap '_worker_finalize "$KANT_WORKER_STATE_DIR" "exit"' EXIT
+
+  # 시작 handshake 마커 — 부모(detach)가 이 파일로 "자식이 실제로 진입했다"를 판정한다.
+  : > "$state_dir/worker-started"
+  log_event "$state_dir" "WORKER_STARTED mode=$mode tool=${tool:-none} model=${model:-none} role=$role"
+
   case "$mode" in
     quick)
       if [ -n "$agent_chain" ]; then
@@ -1619,6 +1700,11 @@ EOF
 
   local elapsed=0
   local result=""
+  local worker_pid=""
+  if [ -f "$state_dir/detached.pid" ]; then
+    worker_pid="$(cat "$state_dir/detached.pid" 2>/dev/null || echo "")"
+  fi
+
   while [ "$elapsed" -lt "$timeout" ]; do
     result="$(cat "$state_dir/result.txt" 2>/dev/null || echo "")"
     if [ -n "$result" ] && [ "$result" != "running" ] && [ "$result" != "unknown" ]; then
@@ -1628,6 +1714,22 @@ EOF
         failed|*)                      exit 1 ;;
       esac
     fi
+
+    # result.txt 만 보면 워커가 죽어도 timeout 까지 헛대기한다(2026-08-04 회귀).
+    # detached PID 가 사라졌는데 terminal state 가 없으면 그 자리에서 실패로 마감한다.
+    if [ -n "$worker_pid" ] && ! kill -0 "$worker_pid" 2>/dev/null; then
+      # 종료 직전 마지막 쓰기가 아직 안 보일 수 있으니 한 번 더 확인한다(경합 방지).
+      sleep 2
+      result="$(cat "$state_dir/result.txt" 2>/dev/null || echo "")"
+      if [ -z "$result" ] || [ "$result" = "running" ] || [ "$result" = "unknown" ]; then
+        fail_run "$state_dir" "WORKER_VANISHED" \
+          "detached worker pid=$worker_pid disappeared without terminal result" || true
+        ( cmd_status "$target" ) 2>&1
+        exit 1
+      fi
+      continue
+    fi
+
     sleep "$interval"
     elapsed=$((elapsed + interval))
   done

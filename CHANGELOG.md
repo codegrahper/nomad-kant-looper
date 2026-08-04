@@ -111,6 +111,52 @@ Bridge / dashboard/web = Eyes**. Phase 3 완료 지점에서 한 번 평가하�
   라우팅 티어에 새지 않음을 확인.
 - 공식 출처 미확정 — 확인되면 라우팅 가이드 §5에 추가.
 
+### detached worker 헛대기 회귀 수정 (2026-08-04, 칸트 직접 작업)
+
+`--detach`로 띄운 자식이 시작도 못 하고 즉시 죽었는데, 실패 상태가 어디에도
+기록되지 않아 `await`가 30분 timeout까지 헛대기한 사고에서 출발. 관측된 상태는
+`status=preparing`, 이벤트는 `RUN_CREATED` 한 줄, `agents: []`, `result.txt`
+없음, detached PID는 이미 종료. **외부 도구(그록)는 호출조차 되지 않았고**,
+30분은 검토 시간이 아니라 죽은 프로세스를 감지하지 못한 시간이었다. detach를
+쓰는 모든 도구에 공통인 오케스트레이션 계층 결함이지 특정 도구 문제가 아니다.
+
+- **detach 시작 handshake** (`kant-loop.sh`) — PID를 띄웠다는 사실만으로 성공을
+  반환하던 것을, 자식이 실제로 `_run_mode`에 진입했는지(`worker-started` 마커)
+  확인한 뒤 반환하도록 변경. 미진입 시 `DETACH_HANDSHAKE_FAILED`로 terminal
+  state를 남기고 exit 1. 시작도 못 한 워커가 뒤늦게 살아나 커밋까지 진행하지
+  않도록 TERM으로 정리한다. 대기 상한은 `KANT_DETACH_HANDSHAKE_TIMEOUT`
+  (기본 15초).
+- **`await`의 워커 생존 검사** (`kant-loop.sh`) — `result.txt`만 폴링하던 루프에
+  detached PID 생존 확인을 추가. PID가 사라졌는데 terminal result가 없으면
+  `WORKER_VANISHED`로 그 자리에서 마감한다. 종료 직전 마지막 쓰기와의 경합을
+  피하려 2초 뒤 한 번 더 확인. `detached.pid`가 없는 foreground run은 기존
+  동작 그대로.
+- **`_run_mode` trap** (`kant-loop.sh`) — `EXIT`/`ERR`/`HUP`/`INT`/`TERM`을 걸어
+  어떤 경로로 죽어도 terminal state를 남긴다. trap 본문이 참조하는 state_dir은
+  전역(`KANT_WORKER_STATE_DIR`)에 둔다 — local 변수는 EXIT trap이 도는 시점에
+  스코프 밖일 수 있고 `set -u`에서 그대로 에러가 된다. 기존 `UNSUPPORTED_MODE`
+  경로는 그대로 유지(먼저 기록되면 trap은 덮어쓰지 않음).
+- **중단 위치 관측 이벤트** (`kant-loop.sh`, `state_writer.py`) —
+  `WORKER_STARTED`/`ADAPTER_STARTED`/`WORKER_ERR` 추가로 중단이 kant-loop
+  쪽인지 외부 도구 쪽인지 사후 구분 가능. `_derive_status`가 `agent_started`
+  (`QUICK_CALL`)만 보던 것도 수정 — 워커가 그 전에 죽은 run이 영영 `preparing`
+  으로 남던 직접 원인이었다.
+- **TASK 스냅샷 전달** (`kant-loop.sh`) — 자식에게 원본 TASK 경로 대신 이미
+  복사해 둔 `$state_dir/task.md`를 넘긴다. 백그라운드로 도는 동안 원본이
+  수정·이동·삭제돼도 작업지시가 흔들리지 않는다.
+- 검증: 신규 `scripts/tests/test-detach-worker-liveness.sh` 8/8(핵심 회귀 —
+  죽은 워커를 timeout 60초가 아니라 2초 만에 감지, 살아있는 워커 오탐 없음,
+  TERM 시그널 → `WORKER_DIED` 기록, 자식 인자가 스냅샷 경로임을 `ps`로 확인),
+  전체 스위트 27/27 회귀 없음. 별도로 가짜 어댑터를 쓴 e2e 재현에서
+  `status=running` → 워커 강제 종료 → `await`가 약 4초 만에 `WORKER_VANISHED`로
+  마감, 이벤트가 `RUN_CREATED → WORKER_STARTED → QUICK_CALL → ADAPTER_STARTED
+  → FAIL`로 남는 것까지 확인.
+- **하지 않은 것**: (1) PID 재사용 방어 — 죽은 PID가 재할당되면 `kill -0`이
+  성공해 생존으로 오판할 수 있다. 오류 방향이 안전한 쪽(기존과 같은 헛대기)이라
+  이번 범위에서 제외했고, 막으려면 프로세스 시작 시각 비교가 필요하다.
+  (2) `role` 기본값은 `implement` 그대로 — 읽기 전용 검토를 `--role review`로
+  호출하는 것은 코드가 아니라 호출 규칙이라 SKILL.md 명문화 과제로 남긴다.
+
 ## [0.8.0] — 2026-07-21 — Portable Runtime Hardening
 
 v0.7.0(Host Contract 정의)을 실제로 닫는 릴리스. 새 오케스트레이션 기능을

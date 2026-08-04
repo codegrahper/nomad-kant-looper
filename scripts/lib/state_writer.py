@@ -61,10 +61,20 @@ def _classify(first: str, rest: str):
     if first == "RUN_CREATED":
         return {"type": "run_created", "stage": None, "agent": None, "model": None,
                 "message": "Run created"}
+    if first == "WORKER_STARTED":
+        return {"type": "worker_started", "stage": None, "agent": None, "model": None,
+                "message": f"worker started mode={d.get('mode')} role={d.get('role')}"}
+    if first == "WORKER_ERR":
+        return {"type": "worker_error", "stage": None, "agent": None, "model": None,
+                "message": f"worker error rc={d.get('rc')} line={d.get('line')}"}
     if first == "QUICK_CALL":
         role = d.get("role")
         return {"type": "agent_started", "stage": role, "agent": d.get("tool"),
                 "model": d.get("model"), "message": f"{role} started"}
+    if first == "ADAPTER_STARTED":
+        return {"type": "adapter_started", "stage": d.get("role"), "agent": d.get("tool"),
+                "model": d.get("model"),
+                "message": f"adapter started {d.get('tool')}:{d.get('model')}"}
     if first == "QUICK_VERDICT":
         verdict = d.get("verdict")
         return {"type": "agent_verdict", "stage": None, "agent": None, "model": None,
@@ -147,7 +157,12 @@ def _derive_status(result, events) -> str:
     if result == "cancelled":
         return "cancelled"
     if result is None:
-        has_call = any(e["type"] == "agent_started" for e in events)
+        # worker/adapter 진입도 "실행 중"으로 인정한다. agent_started(QUICK_CALL)만
+        # 보면, 워커가 그 전에 죽은 run 이 영영 preparing 으로 남는다(2026-08-04 회귀).
+        has_call = any(
+            e["type"] in ("agent_started", "adapter_started", "worker_started")
+            for e in events
+        )
         return "running" if has_call else "preparing"
     return "running"
 
