@@ -151,11 +151,19 @@ Bridge / dashboard/web = Eyes**. Phase 3 완료 지점에서 한 번 평가하�
   `status=running` → 워커 강제 종료 → `await`가 약 4초 만에 `WORKER_VANISHED`로
   마감, 이벤트가 `RUN_CREATED → WORKER_STARTED → QUICK_CALL → ADAPTER_STARTED
   → FAIL`로 남는 것까지 확인.
-- **하지 않은 것**: (1) PID 재사용 방어 — 죽은 PID가 재할당되면 `kill -0`이
+- **`--role review` 명문화** (`SKILL.md`) — 같은 사고에서 읽기 전용 검토가
+  `--role` 없이 실행돼 기본값 `implement`(쓰기 역할·auto-commit·1800초)로
+  돌아간 문제. SKILL.md에는 `--role` 자체가 한 번도 언급되지 않아 Meta Agent가
+  붙일 근거가 없었다. "실행" 섹션에 읽기 전용 작업의 `--role review` 필수
+  규칙과 실제로 달라지는 것(auto-commit 안 함, `CHANGES_REQUESTED`를 정상
+  완료로 취급, timeout 900초, 읽기 전용 지시 자동 삽입)을 코드 근거와 함께
+  기재하고, Rules에도 한 줄 추가. 작업지시에 "수정 금지"라고 쓰는 것으로
+  대체하지 않는다는 점을 명시 — 프롬프트는 실행 계약이 아니다. `--chain`은
+  역할을 자체 배분하므로 `--role`과 함께 쓰지 않는다는 것도 함께 적었다.
+  코드 변경 없음(문서 전용).
+- **하지 않은 것**: PID 재사용 방어 — 죽은 PID가 재할당되면 `kill -0`이
   성공해 생존으로 오판할 수 있다. 오류 방향이 안전한 쪽(기존과 같은 헛대기)이라
   이번 범위에서 제외했고, 막으려면 프로세스 시작 시각 비교가 필요하다.
-  (2) `role` 기본값은 `implement` 그대로 — 읽기 전용 검토를 `--role review`로
-  호출하는 것은 코드가 아니라 호출 규칙이라 SKILL.md 명문화 과제로 남긴다.
 
 ## [0.8.0] — 2026-07-21 — Portable Runtime Hardening
 

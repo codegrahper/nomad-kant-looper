@@ -339,6 +339,32 @@ bash "$SKILL_DIR/scripts/kant-loop.sh" run "$task_file" --quick --agent "$tool" 
 bash "$SKILL_DIR/scripts/kant-loop.sh" await "$run_id"
 ```
 
+**읽기 전용 작업은 반드시 `--role review`를 붙인다.**
+
+`--role`의 기본값은 `implement`다(`kant-loop.sh`). 즉 **안 붙이면 검토를
+시켰어도 구현 역할로 실행된다.** 실제로 문서 타당성 검토를 `--role` 없이
+실행해 쓰기 역할로 돌린 사고가 있었다(2026-08-04). 작업지시에 "읽기 전용",
+"수정 금지"라고 써 두는 것만으로는 막히지 않는다 — 그건 프롬프트일 뿐이고,
+역할 플래그가 실제 실행 계약을 정한다.
+
+```bash
+# 검토·감사·타당성 평가 — 읽기 전용
+bash "$SKILL_DIR/scripts/kant-loop.sh" run "$task_file" --quick \
+  --agent "$tool" --model "$model" --role review --detach
+```
+
+`--role review`가 실제로 바꾸는 것:
+- **auto-commit을 하지 않는다** (`commit_at_end=0`). 기본 `implement`는 verdict가
+  PASS면 작업 브랜치에 커밋한다.
+- **`CHANGES_REQUESTED`를 정상 완료로 취급한다.** 다른 역할에서는 실행 실패다.
+- **timeout이 900초**다(implement/repair는 1800초 — `scripts/lib/timeout-runner.sh`).
+- 프롬프트에 "읽기 전용으로 검토하세요. 파일을 수정하지 마세요"가 자동으로 붙는다.
+
+Step 1에서 파악한 주 작업 의도가 `review`(리뷰/검증/감사/타당성 평가)이면
+`--role review`를 붙인다. `implement`/`repair`는 기본값으로 충분하므로 굳이
+명시하지 않아도 된다. 사용 가능한 값은 `implement|review|repair`이고, 3단계
+순차 체인(`--chain`)은 역할을 자체적으로 배분하므로 `--role`을 함께 쓰지 않는다.
+
 **왜 `--detach`가 기본인가**: kant-loop.sh 내부 role별 timeout(plan/verify
 600초, review 900초, implement/repair 1800초 — `scripts/lib/timeout-runner.sh`
 참고)이 Bash 도구 자체의 동기 blocking 호출 상한보다 긴 경우가 흔하다. 기본
@@ -366,6 +392,7 @@ role인 implement가 바로 이 경우다. 정확한 상한 수치와 우회 방
 - 추가 확인 질문 금지 (단, 위 모델 선택 UI와 Stitch 선택 UI는 "질문"이 아니라 선택 UI로 취급한다 — 자유 텍스트 질문을 새로 만드는 게 아니라 정해진 선택지를 재사용하는 것이므로 이 금지 규칙의 대상이 아니다).
 - `agy`가 선택되면 반드시 Stitch 사용 여부를 먼저 확인한다. 자동 기본값을 고르지 않는다.
 - `--detach`로 실행했다면 반드시 그 자리에서 바로 `await <run_id>`를 background로 이어서 호출한다. `--detach`만 실행하고 끝내지 않는다.
+- 읽기 전용 작업(리뷰·검증·감사·타당성 평가)은 반드시 `--role review`로 실행한다. `--role`을 생략하면 기본값 `implement`로 실행돼 쓰기 역할·auto-commit·1800초 timeout이 적용된다. 작업지시에 "수정 금지"라고 쓰는 것으로 대체하지 않는다.
 - 작업지시 파일은 항상 `TASK-<slug>.md`로 만든다. 고정된 `TASK.md`를 계속 덮어쓰지 않는다. 제목(`# ...`)도 `# Task`처럼 뭉뚱그리지 않고 작업을 구체적으로 나타낸다.
 - Meta Agent는 작업을 직접 구현하지 않는다.
 - 해결책을 제안하지 않는다.
